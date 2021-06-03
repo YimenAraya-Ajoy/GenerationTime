@@ -1,0 +1,600 @@
+---
+title: "Generation time"
+output: html_document
+---
+
+```{r Load packages and functions}
+require(tidyr)
+require(dplyr)
+require(rstan)
+require(brms)
+library(AGHmatrix)
+library(hglm)
+require(arm)
+```
+
+```{r read data and further manipulations, include=FALSE}
+d3<-read.csv("/home/yi/Dropbox/GT/Resubmission/Resubmission3/Data_Code/d.csv")
+
+d4<-d3[]
+d4$age[d4$age>6]<-6
+d4$age2<-as.factor(d4$age)
+d4$flok2<-as.numeric(as.factor(d4$flok))
+d4$agen<-d4$age + 1
+
+d3m<-d4[d4$adsex==1,]
+d3f<-d4[d4$adsex==2,]
+
+dI<-read.csv("dI.csv")
+
+ped <- read.table("ped.txt", header = T, stringsAsFactors = F)
+ped[is.na(ped)]<-"0"
+A  <- Amatrix(ped)
+
+dIM<-read.csv("dIM.csv")
+dFY2<-read.csv("dFY.csv")
+dc2<-read.csv("CaptureHistories.csv")
+
+```
+
+The analyses of this paper is based on different data sets.
+d3 is a the data set containing the data for the recruit production and survival to the next year for each individual at each age.
+
+```{r Descriptive statistics data set 1}
+#Number of individuals
+length(levels(droplevels(d3$ringnr)))
+
+##Number of individual breeding seasons
+nrow(d3)
+
+#Number of males and females
+table(d3$adsex[-which(duplicated(d3$ringnr))])
+
+#Number of males and females individual breeding seasons
+table(d3$adsex)
+
+##Number of individuals per island
+table(d3$name[-which(duplicated(d3$ringnr))])
+
+##Number of individual breeding season per island
+table(d3$name)
+
+###Number of individuals that were recorded breeding per year of birth in each island 
+table(d3$name, d3$firstyear)
+
+###Number of individuals that were recorded breeding per year of death in each island 
+table(d3$name, d3$lastyear)
+
+###Number of individuals that were recorded breeding per year in each island 
+table(d3$name, d3$year)
+```
+
+dI is a data set that contains the life history metrics for each individual. These metrics were calculated using a subset of the data in d3.
+```{r Descriptive statistics data set 2}
+
+##Number of individuals
+length(levels(droplevels(as.factor(dI$ringnr))))
+
+##Number of males and females
+table(dI$sex)
+
+##Number of individuals per island
+table(dI$name)
+
+##Number of individuals that were recorded breeding per year of birth in each island 
+table(dI$name, dI$firstyear)
+
+##Number of individuals that were recorded breeding per year in each island 
+table(dI$name, dI$lastyear)
+
+```
+
+dFY2 is data set that contains the average mean age at reproduction for each island in each year,
+```{r Descriptive statistics data set 3}
+table(droplevels(as.factor(dFY2$newflok)))
+table(dFY2$newflok, dFY2$year)
+min(dI$GT)
+max(dI$GT)
+```
+
+The following code can be used to replicate the analyzes presented in table 1.
+```{r Analysis table 1, cache=TRUE}
+#Note that flok is the code for population.
+#Column 1
+model_GTA <- brm(GT ~ 1 + sex + (1|animal) + (1|flok) + (1|firstyear),    data = dI,
+                  family = gaussian(),
+                  cov_ranef = list(animal = A),
+                  chains = 3,
+                  cores = 3,
+                  iter = 3000,
+                  thin=3)
+summary(model_GTA)
+
+##Estimating heritability and evolvability
+posterior_brms <- posterior_samples(model_GTA, pars = c("sd_animal", "sd_flok", "sigma","sd_firstyear", "Intercept"))
+
+h2_brms  <- (posterior_brms[,1]^2/(posterior_brms[,1]^2 + posterior_brms[,2]^2 + posterior_brms[,3]^2 + posterior_brms[,4]^2))*100
+
+round(mean(h2_brms),2)
+round(quantile(h2_brms, c(0.025,0.975)),2)
+
+e<-(posterior_brms[,1]^2/posterior_brms[,5]^2*100)
+round(mean(e),2)
+round(quantile(e, c(0.025, 0.975)),2)
+
+#Column 2
+mod.GT<-brm(lGT~sex + lBM +(1|flok) + (1|firstyear), data=dIM,  chains = 3, cores = 3)
+summary(mod.GT)
+
+#Column 3
+mod.LRS<-brm(LRS ~ GT +sex + (1|flok) + (1|firstyear), data=dI,  chains = 3, cores = 3)
+summary(mod.LRS)
+
+#Column 4
+mod.Lambda<-brm(lambda ~ GT +sex + (1|flok)  + (1|firstyear), data=dI,  chains = 3, cores = 3)
+summary(mod.Lambda)
+
+
+```
+
+The following code can be used to replicate the analyzes presented in table S2.
+```{r Analysis table S2, cache=TRUE}
+#Column 1
+model_GTA2 <- brm(GT ~ 1 + sex + (1|animal),
+                  data = dI,
+                  family = gaussian(),
+                  cov_ranef = list(animal = A),
+                  chains = 3,
+                  cores = 3,
+                  iter = 3000,
+                  thin=3)
+
+summary(model_GTA2)
+
+posterior_brms <- posterior_samples(model_GTA2, pars = c("sd_animal", "sigma", "Intercept"))
+
+h2_brms  <- (posterior_brms[,1]^2 / (posterior_brms[,1]^2 + posterior_brms[,2]^2))*100
+round(mean(h2_brms),2)
+round(quantile(h2_brms, c(0.025,0.975)),2)
+
+e<-(posterior_brms[,1]^2/posterior_brms[,3]^2*100)
+round(mean(e),2)
+round(quantile(e, c(0.025, 0.975)),2)
+
+#Column 2
+model_lGTA <- brm(lGT ~ 1 + sex + lBM + (1|animal) + (1|flok) + (1|firstyear),
+                  data = dIM,
+                  family = gaussian(),
+                  cov_ranef = list(animal = A),
+                  chains = 3,
+                  cores = 3,
+                  iter = 3000,
+                  thin=3)
+
+summary(model_lGTA)
+
+#Column 3
+model_GTALN <- brm(GT ~ 1 + sex + (1|animal) + (1|flok) + (1|firstyear),
+                  data = dI,
+                  family = lognormal(),
+                  cov_ranef = list(animal = A),
+                  chains = 3,
+                  cores = 3,
+                  iter = 3000,
+                  thin=3)
+
+summary(model_GTALN)
+
+#Column 4
+mod.LRS2<-brm(LRS ~ GT +sex + (1|flok) + (1|firstyear), data=dI,  chains = 3, cores = 3, family=poisson())
+summary(mod.LRS2)
+
+#Column 5
+mod.Lambda2<-brm(lambda ~ GT +sex + (1|flok)  + (1|firstyear), data=dI,  chains = 3, cores = 3, family=lognormal())
+summary(mod.Lambda2)
+
+
+```
+
+The following code can be used to replicate the analyzes presented in table 2.
+```{r Analysis table 2: Models age dep rep and surv, cache=TRUE}
+#Column 1
+mod.recruits<-brm(totalrecruits ~ age*gensex + agesq*gensex + mean.pop + rel.pop + (1|ringnr) + (1|laflok) +  (1|year), data=d3, chains = 3, cores = 3, iter=5000,family=negbinomial())
+summary(mod.recruits)
+
+##Note that the presented model in the paper is in a CMR framework (see below).
+mod.surv<-brm(survival ~ age*gensex + agesq*gensex + mean.pop + rel.pop + (1|ringnr) + (1|laflok) +  (1|year), data=d3, chains = 3, iter=3000, cores = 3, family=bernoulli())
+summary(mod.surv)
+
+
+mod.recruits2<-brm(totalrecruits ~ age2*gensex + mean.pop + rel.pop +  (1|ringnr) + (1|laflok) +  (1|year), data=d4, chains = 3, cores = 3, iter=3000,family=negbinomial())
+summary(mod.recruits2)
+
+
+mod.surv2<-brm(survival ~ age2*gensex + mean.pop + rel.pop + (1|ringnr) + (1|laflok) +  (1|year), data=d4, chains = 3, iter=3000, cores = 3, family=bernoulli())
+summary(mod.surv2)
+
+mod.surv3<-brm(survival ~ age*gensex + mean.pop + rel.pop + (1|ringnr) + (1|laflok) +  (1|year), data=d3, chains = 3, iter=3000, cores = 3, family=bernoulli())
+summary(mod.surv3)
+```
+
+```{r Mark-recapture model prepare data}
+
+get.first <- function(x) min(which(x!=0))
+dc2<-read.csv("/home/yi/Desktop/Desktop2021/HelgelandCMRcombined2ad_2.csv", sep=";")
+dR2<-d3[(d3$firstyear+1)>1998 & (d3$firstyear+1)<2012, c("ringnr", "gensex", "laflok", "mean.pop", "age", "year")]
+
+dR1<- spread(dR2, year, age)
+dxxx<-merge(dc2, dR1)
+dxx<-dxxx[apply(dxxx[c(9:23)],1,sum)!=0,]
+
+CH<-dc<-dxx[,c(9:24)]
+dA<-dxx[,32:ncol(dxx)]
+
+
+dP2<-d3[-which(duplicated(d3$flok_year)),c("laflok", "year", "rel.pop")]
+dP1<- as.matrix(spread(dP2, year, rel.pop)[,-1])
+dP1[is.na(dP1)]<-0
+dP<-matrix(NA,8,15)
+dP[]<-dP1[]
+sex<-as.numeric(dxx$gensex)-1
+flok<-as.numeric(as.factor(dxx$laflok))
+mean.pop<-dxx$mean.pop
+
+
+f<-apply(dc, 1, get.first)
+
+x<-matrix(NA,nrow(dc), ncol(dc)-1)
+for(i in 1:nrow(x)){
+x[i,f[i]:ncol(x)]<-1:length(f[i]:ncol(x))
+x[i,f[i]]<-1
+}
+
+FY<-dP
+FY[]<-1:120
+x[is.na(x)]<-0
+
+max(x)
+stan_data <- list(y =CH ,  nind = dim(CH)[1], n_occasions =
+                    dim(CH)[2], flok=flok, nflok=max(flok), xl=x, sex=sex, mean_pop=mean.pop, rel_pop=dP, FY=FY, nFY=120, max_age=max(x))
+
+cjs.init.z <- function(ch,f){
+  for (i in 1:dim(ch)[1]){
+    if (sum(ch[i,])==1) next
+    n2 <- max(which(ch[i,]==1))
+    ch[i,f[i]:n2] <- NA
+  }
+  for (i in 1:dim(ch)[1]){
+    ch[i,1:f[i]] <- NA
+  }
+  return(ch)
+}
+
+#Initial values
+###if gets stuck repeaat initial
+inits <- function() list(y = cjs.init.z(CH, f), mean_p = runif(1, 0, 1),
+                         sigmaI_phi = runif(1, 0, 1),
+                         sigmaFY_p = runif(1, 0, 1))
+
+#Parameters monitored
+
+params <- c("mean_phi", "mean_p", "sigmaFY_p", "sigmaF_phi",  "sigmaY_phi", "sigmaI_phi", "s_phi", "B","Bq", "Bs","Bqs", "mu_phi", "dr", "dm")
+## MCMC settingsl
+ni <- 5000
+nt <- 15
+nc <- 3
+
+
+## Call Stan from R
+cjs_temp_raneff2 <- stan("cjs_temp_raneff2.stan",
+                        data = stan_data, init = inits, pars = params,
+                        chains = nc, iter = ni, thin = nt,
+                        cores=3)
+
+                  # # Summarize posteriors 
+print(cjs_temp_raneff2, digits = 2)
+```
+
+The following code can be used to replicate the analyzes presented in table 3.
+```{r Analysis table 3, cache=TRUE}
+mod.meanAgeR1<-brm(meanAgeR~  gensex * meanW +  (1|flok) + (1|year), data=dFY2, family=gaussian(),
+                  chains = 3,
+                  cores = 3)
+summary(mod.meanAgeR1)
+
+mod.meanAgeR2<-brm(meanAgeR~ gensex + mean.pop + gensex*rel.pop +  (1|flok) + (1|year), data=dFY2, family=gaussian(),
+                  chains = 3,
+                  cores = 3)
+summary(mod.meanAgeR2)
+```
+
+The following code can be used to replicate the analyzes presented in table S3.
+```{r Analysis table S3, cache=TRUE}
+#Column 1
+mod.meanAgeR1LN<-brm(meanAgeR~  gensex2 * meanW +  (1|flok) + (1|year), data=dFY2, family=lognormal(),
+                  chains = 3,
+                  cores = 3)
+summary(mod.meanAgeR1LN)
+
+#Column 2
+mod.meanAgeR2LN<-brm(meanAgeR~ gensex2 + mean.pop + gensex2*rel.pop +  (1|flok) + (1|year), data=dFY2, family=lognormal(),
+                  chains = 3,
+                  cores = 3)
+summary(mod.meanAgeR2LN)
+
+#Column 3
+mod.meanAgeRB<-brm(meanAgeR~  gensex2 * meanW + meanAge +  (1|flok) + (1|year), data=dFY2, family=gaussian(),
+                  chains = 3,
+                  cores = 3)
+summary(mod.meanAgeRB)
+
+
+#Column 4
+mod.meanAgeRB2<-brm(meanAgeR~  mean.pop + gensex2*rel.pop + meanAge+ (1|flok) + (1|year), data=dFY2, family=gaussian(),
+                  chains = 3,
+                  cores = 3)
+summary(mod.meanAgeRB2)
+```
+
+Code to produce figure 1.
+```{r Figure 1: Age dep rep}
+
+jpeg("/home/yi/Dropbox/GT/Final/Figure1.jpeg",width = 6000, height = 4000, res=600)
+
+par(mfrow=c(2,3))
+
+dSR<-d3f %>% group_by(adsex, agen) %>% summarize(sumRE=mean(totalrecruits, na.rm=TRUE))
+dSR$sumREp<-dSR$sumRE/sum(dSR$sumRE, na.rm=TRUE)
+dSR<-dSR[1:7,]
+
+plot(dSR$sumREp~dSR$agen, type="l",  ylim=c(0,0.5), ylab="# of recruits/individual", xlab="Age of mother", lwd=2, cex.lab=1.2, yaxt="n")
+axis(2, seq(0,0.5, by=0.1), seq(0,0.5, by=0.1), las=2)
+
+mtext("A)",3, 0.6, at=1, las=1)
+
+dSR<-d3f %>% group_by(flok2, adsex, agen) %>% summarize(sumRE=mean(totalrecruits))
+for(i in 1:max(d4$flok2)){
+dSR.tmp<-dSR[dSR$flok2==i,]
+dSR.tmp$sumREp<-dSR.tmp$sumRE/sum(dSR.tmp$sumRE, na.rm=TRUE)
+points(dSR.tmp$sumREp~dSR.tmp$agen, type="l", col="lightgray")
+}
+dSR<-d3f %>% group_by(adsex, agen) %>% summarize(sumRE=mean(totalrecruits, na.rm=TRUE))
+dSR$sumREp<-dSR$sumRE/sum(dSR$sumRE, na.rm=TRUE)
+dSR<-dSR[1:7,]
+points(dSR$sumREp~dSR$agen, type="l", lwd=2)
+
+dSR<-d3f %>% group_by(adsex, agen) %>% summarize(sumRE=sum(totalrecruits, na.rm=TRUE))
+dSR$sumREp<-dSR$sumRE/sum(dSR$sumRE, na.rm=TRUE)
+dSR<-dSR[1:7,]
+
+
+plot(dSR$sumREp~dSR$agen, type="l", ylim=c(0,0.7), ylab="Proportions of recruits", xlab="Age of mother", lwd=2, cex.lab=1.2, yaxt="n")
+axis(2, seq(0,0.7, by=0.1), seq(0,0.7, by=0.1), las=2)
+
+mtext("B)",3, 0.6, at=1, las=1)
+
+dSR<-d3f %>% group_by(flok2, adsex, agen) %>% summarize(sumRE=sum(totalrecruits))
+dSR<-as.data.frame(dSR[complete.cases(dSR$flok2),])
+
+for(i in 1:max(d4$flok2)){
+dSR.tmp<-dSR[dSR$flok2==i,]
+dSR.tmp$sumREp<-dSR.tmp$sumRE/sum(dSR.tmp$sumRE, na.rm=TRUE)
+points(dSR.tmp$sumREp~dSR.tmp$age, type="l", col="lightgray")
+}
+dSR<-d3f %>% group_by(adsex, age) %>% summarize(sumRE=sum(totalrecruits, na.rm=TRUE))
+dSR$sumREp<-dSR$sumRE/sum(dSR$sumRE, na.rm=TRUE)
+dSR<-dSR[1:7,]
+
+points(dSR$sumREp~dSR$agen, type="l", lwd=2)
+
+
+dSR<-as.data.frame(table(d3f$agen))
+dSR$Freq2<-dSR$Freq/sum(as.numeric(dSR$Freq))
+plot(dSR$Freq2~as.numeric(dSR$Var1),  type="l",  ylab="Proportion of females", xlab="Age of females", lwd=2, ylim=c(0,0.7), cex.lab=1.2, yaxt="n")
+axis(2, seq(0,0.7, by=0.1), seq(0,0.7, by=0.1), las=2)
+
+mtext("C)",3, 0.6, at=1, las=1)
+
+dSR<-as.data.frame(table(d3f$agen, d3f$flok2))
+for(i in 1:max(d4$flok2)){
+dSR.tmp<-dSR[dSR$Var2==i,]
+dSR.tmp$Freq2<-dSR.tmp$Freq/sum(as.numeric(dSR.tmp$Freq))
+points(dSR.tmp$Freq2~as.numeric(dSR.tmp$Var1),  type="l",  col="lightgray")
+}
+
+dSR<-as.data.frame(table(d3f$agen))
+dSR$Freq2<-dSR$Freq/sum(as.numeric(dSR$Freq))
+points(dSR$Freq2~as.numeric(dSR$Var1), type="l", lwd=2)
+
+
+dSR<-d3m %>% group_by(adsex, agen) %>% 
+summarize(sumRE=mean(totalrecruits))
+dSR<-dSR[1:7,]
+dSR$sumREp<-dSR$sumRE/sum(dSR$sumRE)
+plot(dSR$sumREp~dSR$agen, type="l", ylim=c(0,0.5), ylab="# of recruits/individual", xlab="Age of father", lwd=2, cex.lab=1.2, yaxt="n")
+axis(2, seq(0,0.5, by=0.1), seq(0,0.5, by=0.1), las=2)
+
+mtext("D)",3, 0.6, at=1, las=1)
+
+dSR<-d3m %>% group_by(flok2, adsex, agen) %>% summarize(sumRE=mean(totalrecruits))
+dSR<-as.data.frame(dSR[complete.cases(dSR$flok2),])
+for(i in 1:max(d4$flok2)){
+dSR.tmp<-dSR[dSR$flok2==i,]
+dSR.tmp$sumREp<-dSR.tmp$sumRE/sum(dSR.tmp$sumRE)
+points(dSR.tmp$sumREp~dSR.tmp$agen, type="l", col="lightgray")
+}
+
+dSR<-d3m %>% group_by(adsex, agen) %>% 
+summarize(sumRE=mean(totalrecruits))
+dSR<-dSR[1:7,]
+dSR$sumREp<-dSR$sumRE/sum(dSR$sumRE)
+points(dSR$sumREp~dSR$agen, type="l", lwd=2, cex.lab=1.2)
+
+
+dSR<-d3m %>% group_by(adsex, agen) %>% summarize(sumRE=sum(totalrecruits))
+dSR<-dSR[1:7,]
+dSR$sumREp<-dSR$sumRE/sum(dSR$sumRE)
+plot(dSR$sumREp~dSR$agen, type="l",  ylim=c(0,0.7), ylab="Proportions of recruits", xlab="Age of sire", lwd=2, cex.lab=1.2, yaxt="n")
+axis(2, seq(0,0.7, by=0.1), seq(0,0.7, by=0.1), las=2)
+
+mtext("E)",3, 0.6, at=1, las=1)
+
+dSR<-d3m %>% group_by(flok2, adsex, agen) %>% summarize(sumRE=sum(totalrecruits))
+dSR<-as.data.frame(dSR[complete.cases(dSR$flok2),])
+for(i in 1:max(d4$flok2)){
+dSR.tmp<-dSR[dSR$flok2==i,]
+dSR.tmp$sumREp<-dSR.tmp$sumRE/sum(dSR.tmp$sumRE)
+points(dSR.tmp$sumREp~dSR.tmp$age, type="l", col="lightgray")
+}
+dSR<-d3m %>% group_by(adsex, agen) %>% summarize(sumRE=sum(totalrecruits))
+dSR<-dSR[1:7,]
+dSR$sumREp<-dSR$sumRE/sum(dSR$sumRE)
+
+points(dSR$sumREp~dSR$agen, type="l", lwd=2)
+
+dSR<-as.data.frame(table(d3m$agen))
+dSR$Freq2<-dSR$Freq/sum(as.numeric(dSR$Freq))
+plot(dSR$Freq2~as.numeric(dSR$Var1),  type="l",  ylab="Proportion of males", xlab="Age of males", lwd=2, ylim=c(0,0.7), cex.lab=1.2, yaxt="n")
+axis(2, seq(0,0.7, by=0.1), seq(0,0.7, by=0.1), las=2)
+
+mtext("F)",3, 0.8, at=1, las=1)
+dSR<-as.data.frame(table(d3m$agen, d3m$flok))
+for(i in levels(as.factor(d3m$flok))){
+dSR.tmp<-dSR[dSR$Var2==i,]
+dSR.tmp$Freq2<-dSR.tmp$Freq/sum(as.numeric(dSR.tmp$Freq))
+points(dSR.tmp$Freq2~as.numeric(dSR.tmp$Var1),  type="l",  col="lightgray")
+}
+dSR<-as.data.frame(table(d3m$agen))
+dSR$Freq2<-dSR$Freq/sum(as.numeric(dSR$Freq))
+points(dSR$Freq2~as.numeric(dSR$Var1), type="l", lwd=2)
+
+
+dev.off()
+```
+
+Code to produce figure 2.
+```{r Figure 2: Plot Growth and mean age}
+jpeg("/home/yi/Dropbox/GT/Final/Figure1.jpeg",width = 4000, height = 2000, res=600)
+
+dFY2F<-dFY2[dFY2$gensex=="f", ]
+dFY2M<-dFY2[dFY2$gensex=="m", ]
+
+par(mfrow=c(1,2), mar=c(4,3,2,1))
+
+plot(dFY2F$meanAgeR+1~dFY2F$meanW, ylab="", xlab="", yaxt="n", xlim=c(0,1.8), ylim=c(0.5,5.2), col="darkgray")
+axis(2, 0:5, 0:5, las=2)
+mtext("Mean age of mothers",2,2, cex=0.8)
+mtext("Mean fitness",1,2, cex=0.8)
+mtext("A)",2,-0.5, at=5.7, las=2)
+mod<-lmer(meanAgeR+1~meanW +(1|flok) + (1|year), data=dFY2F)
+smod<-sim(mod,1000)
+x<-seq(0,1.8, by=0.01)
+y<-matrix(NA, 1000, length(x))
+for(i in 1:1000){
+y[i,]<-smod@fixef[i,1] + smod@fixef[i,2]*x   
+}
+l<-apply(y,2,quantile, 0.025)
+u<-apply(y,2,quantile, 0.975)
+m<-apply(y,2,mean)
+points(m~x, type="l")
+points(u~x, type="l", lty=2)
+points(l~x, type="l", lty=2)
+
+plot(dFY2M$meanAgeR + 1~dFY2M$meanW, ylab="", xlab="", yaxt="n", xlim=c(0,1.8), ylim=c(0.5,5.2), col="darkgray")
+axis(2, 0:5, 0:5, las=2)
+mtext("Mean age of fathers",2,2, cex=0.8)
+mtext("Mean fitness",1,2, cex=0.8)
+mtext("B)",2,-0.5, at=5.7, las=2)
+mod<-lmer(meanAgeR+1~meanW +(1|flok) + (1|year), data=dFY2M)
+smod<-sim(mod,1000)
+x<-seq(0,1.8, by=0.01)
+y<-matrix(NA, 1000, length(x))
+for(i in 1:1000){
+y[i,]<-smod@fixef[i,1] + smod@fixef[i,2]*x   
+}
+l<-apply(y,2,quantile, 0.025)
+u<-apply(y,2,quantile, 0.975)
+m<-apply(y,2,mean)
+points(m~x, type="l")
+points(u~x, type="l", lty=2)
+points(l~x, type="l", lty=2)
+
+dev.off()
+```
+
+Code to produce figure S1.
+```{r Figure S1}
+mod.recruits<-glm(totalrecruits ~ age*gensex + agesq*gensex + mean.pop + rel.pop, data=d3, family=poisson)
+
+mod.recruits2<-glm(totalrecruits ~ age2*gensex + mean.pop + rel.pop, data=d4, family=poisson)
+
+mod.surv<-glm(survival ~ age*gensex + agesq*gensex + mean.pop + rel.pop, data=d3, family=binomial)
+summary(mod.surv)
+
+mod.surv2<-glm(survival ~ age2*gensex +  mean.pop + rel.pop, data=d4, family=binomial)
+summary(mod.surv2)
+
+age<-seq(0,6, by=0.1)
+B<-coef(mod.recruits)
+B2<-coef(mod.surv)
+B3<-coef(mod.recruits2)
+B4<-coef(mod.surv2)
+
+dSR<-d3f %>% group_by(age) %>% summarize(sumRE=mean(totalrecruits, na.rm=TRUE),
+          surv=mean(survival, na.rm=TRUE))
+dSR<-dSR[1:7,]
+
+jpeg("/home/yi/Dropbox/GT/Resubmission/Resubmission3/FigureS1.jpeg", width = 1800, height = 1200, res=200)
+par(mfrow=c(2,2))
+plot(dSR$sumRE~dSR$age, type="p", ylab="# of recruits/individual", xlab="Age of female", lwd=2, cex.lab=1.2, ylim=c(0.2,1), cex=1, pch=19, xaxt="n")
+mtext("A)",3, 0.6, at=1, las=1)
+axis(1, 0:6, 1:7)
+
+y=exp(B[1] + ((B[2]) * age) + (B[4])*age^2  + B[5]*mean(d3$mean.pop) + B[6]*mean(d3$rel.pop)) 
+points(y~age, type="l")
+
+y2=c(exp(B3[1] + B3[9]*mean(d3$mean.pop) + B3[10]*mean(d3$rel.pop)), exp(B3[1] + B3[9]*mean(d3$mean.pop) + B3[10]*mean(d3$rel.pop) + B3[2:7]))
+
+points(y2~c(0:6), col="red", cex=1.5)
+
+plot(dSR$surv~dSR$age, type="p", ylab="Survival (p)", xlab="Age of female", lwd=2, cex.lab=1.2, ylim=c(0.2,0.8), pch=19, xaxt="n")
+mtext("B)",3, 0.6, at=1, las=1)
+axis(1, 0:6, 1:7)
+
+y=invlogit(B2[1] + ((B2[2]) * age) + (B2[4])*age^2  + B2[5]*mean(d3$mean.pop) + B2[6]*mean(d3$rel.pop)) 
+points(y~age, type="l")
+
+y2=c(invlogit(B4[1] + B4[9]*mean(d3$mean.pop) + B4[10]*mean(d3$rel.pop)), invlogit(B4[1] + B4[9]*mean(d3$mean.pop) + B4[10]*mean(d3$rel.pop) + B4[2:7]))
+
+points(y2~c(0:6), col="red", cex=1.5)
+
+dSR<-d3m %>% group_by(age) %>% 
+summarize(sumRE=mean(totalrecruits, na.rm=TRUE),
+          surv=mean(survival))
+
+dSR<-dSR[1:7,]
+plot(dSR$sumRE~dSR$age, type="p", ylab="# of recruits/individual", xlab="Age of male", lwd=2, cex.lab=1.2, ylim=c(0.2,1), xaxt="n", pch=19)
+mtext("C)",3, 0.6, at=1, las=1)
+axis(1, 0:6, 1:7)
+
+y=exp(B[1] + B[3] + ((B[2] + B[7]) * age) + (B[4] + B[8])*age^2  + B[5]*mean(d3$mean.pop) + B[6]*mean(d3$rel.pop)) 
+points(y~age, type="l")
+
+y2=c(exp(B3[1] + B3[8] + B3[9]*mean(d3$mean.pop) + B3[10]*mean(d3$rel.pop)), exp(B3[1] +  B4[8]   + B3[11:16] + B3[9]*mean(d3$mean.pop) + B3[10]*mean(d3$rel.pop)))
+points(y2~c(0:6), col="red", cex=1.5)
+
+
+plot(dSR$surv~dSR$age, type="p", ylab="Survival (p)", xlab="Age of male", lwd=2, cex.lab=1.2, ylim=c(0.2,0.8), xaxt="n", pch=19)
+mtext("D)",3, 0.6, at=1, las=1)
+axis(1, 0:6, 1:7)
+
+y=invlogit(B2[1] + B2[3] + ((B2[2] + B2[7]) * age) + (B2[4] + B2[8])*age^2  + B2[5]*mean(d3$mean.pop) + B2[6]*mean(d3$rel.pop)) 
+points(y~age, type="l")
+
+y2=c(invlogit(B4[1] + B4[8] + B4[9]*mean(d3$mean.pop) + B4[10]*mean(d3$rel.pop)), invlogit(B4[1] +  B4[8] + B4[9]*mean(d3$mean.pop) + B4[10]*mean(d3$rel.pop) + B4[2:7] + B4[11:16]))
+
+points(y2~c(0:6), col="red", cex=1.5)
+
+dev.off()
+```
+
